@@ -4,7 +4,7 @@ A deliberately small terminal agent that demonstrates how Braintrust captures:
 
 - the full terminal session
 - each user turn
-- automatically instrumented OpenAI calls
+- manually traced OpenAI calls
 - explicit calculator and web-search tool spans
 
 The tools stay intentionally simple:
@@ -36,11 +36,12 @@ Tavily is optional. Arithmetic and unit conversion still work without it.
 ## Run
 
 ```bash
-python agent.py
+python simple_agent.py
 ```
 
 To record every chat turn as a separate root trace while grouping all turns by
-the same `metadata.session_id`, run:
+the same `metadata.session_id`, set `GROUP_AS_CONVERSATION = False` in
+`simple_agent.py`, or run:
 
 ```bash
 python agent_session_traces.py
@@ -58,19 +59,23 @@ What are the latest major announcements from OpenAI?
 ## Expected trace
 
 ```text
-terminal_chat_session
+Chat Session
 └── chat_turn
-    ├── openai.responses
+    ├── openai.responses.create
     ├── calculate or web_search
-    └── openai.responses
+    └── openai.responses.create
 ```
 
-`braintrust.auto_instrument()` captures OpenAI inputs, outputs, latency, token usage, and cost. The `@traced` decorators create readable application and tool spans around those model calls.
+The `@traced` decorators create readable application, LLM, and tool spans. OpenAI
+inputs, outputs, latency, and related metadata are logged explicitly in
+`call_model()` rather than via auto-instrumentation.
 
-The second implementation has no enclosing session span, so each `chat_turn`
-starts a new trace. Braintrust's session view groups those traces using their
-shared `metadata.session_id`.
+When `GROUP_AS_CONVERSATION` is `False`, there is no enclosing session span, so
+each `chat_turn` starts a new trace. Braintrust's session view groups those
+traces using their shared `metadata.session_id`.
 
-## Why the import happens inside `chat()`
+## Why the import happens inside `main()`
 
-Braintrust must initialize and enable auto-instrumentation before the OpenAI client is created. Keeping the OpenAI import next to that startup sequence makes the ordering obvious in a teaching demo.
+Braintrust must initialize before the OpenAI client is created. Keeping the
+OpenAI import next to that startup sequence makes the ordering obvious in a
+teaching demo.

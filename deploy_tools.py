@@ -11,7 +11,7 @@ from __future__ import annotations
 import braintrust
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent import PROJECT, TOOLS, calculate, web_search
+from simple_agent import PROJECT, TOOLS, calculate, web_search
 
 TOOL_DEFINITIONS = {tool["name"]: tool for tool in TOOLS}
 

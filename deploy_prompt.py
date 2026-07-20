@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import braintrust
 
-from agent import MODEL, PROJECT, SYSTEM_PROMPT
+from simple_agent import MODEL, PROJECT, SYSTEM_PROMPT
 
 project = braintrust.projects.create(PROJECT)
 project.prompts.create(
