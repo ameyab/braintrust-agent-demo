@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal tool-using AI agent with Braintrust tracing."""
+"""Minimal streaming tool-using AI agent with Braintrust tracing."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ TOOLS = [
     },
 ]
 
-@traced(name="calculate", type="tool")
+
 def calculate(expression: str) -> str:
     """Evaluate arithmetic or unit conversion with the free Math.js API."""
     response = requests.get(
@@ -76,7 +76,6 @@ def calculate(expression: str) -> str:
     return response.text
 
 
-@traced(name="web_search", type="tool")
 def web_search(query: str) -> str:
     """Search Tavily and return a compact set of results."""
     api_key = os.getenv("TAVILY_API_KEY")
@@ -120,23 +119,36 @@ def answer_question(
     question: str,
     session_id: str,
 ) -> str:
-    """Run one agent turn, including any requested tools."""
+    """Run one agent turn and print model text as streaming deltas arrive."""
     braintrust.current_span().log(metadata={"session_id": session_id})
     conversation.append({"role": "user", "content": question})
 
     for _ in range(5):
-        response = client.responses.create(
+        streamed_text = False
+
+        # Keep the stream context open until all events have been consumed.
+        # This lets OpenAI and Braintrust finalize the response and its usage data.
+        with client.responses.stream(
             model=MODEL,
             instructions=SYSTEM_PROMPT,
             input=conversation,
             tools=TOOLS,
-        )
+        ) as stream:
+            for event in stream:
+                if event.type == "response.output_text.delta":
+                    print(event.delta, end="", flush=True)
+                    streamed_text = True
 
-        for item in response.output:
-            print(item.type, getattr(item, "call_id", None), getattr(item, "name", None))
+            response = stream.get_final_response()
 
+        # Streaming helpers may attach parsed_arguments for local use. It is
+        # not a valid Responses API input field, so do not send it back.
         conversation.extend(
-            item.model_dump(exclude_none=True) for item in response.output
+            item.model_dump(
+                exclude_none=True,
+                exclude={"parsed_arguments"},
+            )
+            for item in response.output
         )
 
         tool_calls = [
@@ -144,6 +156,8 @@ def answer_question(
         ]
         if not tool_calls:
             answer = response.output_text or "The model returned no answer."
+            if not streamed_text:
+                print(answer, end="", flush=True)
             conversation.append({"role": "assistant", "content": answer})
             return answer
 
@@ -163,7 +177,9 @@ def answer_question(
                 }
             )
 
-    return "Stopped after too many tool calls."
+    answer = "Stopped after too many tool calls."
+    print(answer, end="", flush=True)
+    return answer
 
 
 def chat() -> None:
@@ -173,8 +189,8 @@ def chat() -> None:
     if not os.getenv("BRAINTRUST_API_KEY"):
         raise SystemExit("Set BRAINTRUST_API_KEY before running the demo.")
 
-    # Initialize Braintrust before constructing the provider client so that
-    # auto-instrumentation can capture OpenAI calls.
+    # Initialization is unchanged for streaming: instrument OpenAI before
+    # importing it or constructing its client.
     logger = braintrust.init_logger(project=PROJECT)
     braintrust.auto_instrument()
 
@@ -183,15 +199,15 @@ def chat() -> None:
     client = OpenAI()
     conversation: list[dict[str, Any]] = []
 
-    print(f"Demo agent using {MODEL}")
+    print(f"Streaming demo agent using {MODEL}")
     print("Try math, unit conversion, or a current-information question.")
     print("Type \\quit to exit.\n")
 
     session_id = str(uuid.uuid4())
     with logger.start_span(
         name="Chat Session",
-        metadata={"model": MODEL, "session_id": session_id}, 
-        tags=["multi-spam"]
+        metadata={"model": MODEL, "session_id": session_id},
+        tags=["Streaming"],
     ):
         while True:
             try:
@@ -205,8 +221,9 @@ def chat() -> None:
             if question.lower() in QUIT_COMMANDS:
                 break
 
-            answer = answer_question(client, conversation, question, session_id)
-            print(f"Agent: {answer}\n")
+            print("Agent: ", end="", flush=True)
+            answer_question(client, conversation, question, session_id)
+            print("\n")
 
     logger.flush()
 

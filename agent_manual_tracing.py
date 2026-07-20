@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal tool-using AI agent with Braintrust tracing."""
+"""Tool-using AI agent with fully manual OpenAI and tool tracing."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import requests
 from braintrust import traced
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-PROJECT = os.getenv("BRAINTRUST_PROJECT", "demo_ai_agent")
+PROJECT = os.getenv("BRAINTRUST_PROJECT", "demo_ai_agent_manual_tracing")
 QUIT_COMMANDS = {"\\q", "\\quit", "\\exit"}
 
 SYSTEM_PROMPT = """
@@ -64,6 +64,7 @@ TOOLS = [
     },
 ]
 
+
 @traced(name="calculate", type="tool")
 def calculate(expression: str) -> str:
     """Evaluate arithmetic or unit conversion with the free Math.js API."""
@@ -113,6 +114,48 @@ TOOL_HANDLERS: dict[str, Callable[..., str]] = {
 }
 
 
+@traced(name="openai.responses.create", type="llm", notrace_io=True)
+def call_model(client: Any, conversation: list[dict[str, Any]]) -> Any:
+    """Call OpenAI and log the LLM span in Braintrust's standard format."""
+    response = client.responses.create(
+        model=MODEL,
+        instructions=SYSTEM_PROMPT,
+        input=conversation,
+        tools=TOOLS,
+    )
+
+    output = [
+        item.model_dump(exclude_none=True)
+        for item in response.output
+    ]
+    metrics: dict[str, int] = {}
+    usage = response.usage
+    if usage is not None:
+        metrics.update(
+            prompt_tokens=usage.input_tokens,
+            completion_tokens=usage.output_tokens,
+            tokens=usage.total_tokens,
+        )
+        input_details = getattr(usage, "input_tokens_details", None)
+        cached_tokens = getattr(input_details, "cached_tokens", None)
+        if cached_tokens is not None:
+            metrics["prompt_cached_tokens"] = cached_tokens
+
+    braintrust.current_span().log(
+        input=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            *conversation,
+        ],
+        output=output,
+        metadata={
+            "model": MODEL,
+            "tools": TOOLS,
+        },
+        metrics=metrics,
+    )
+    return response
+
+
 @traced(name="chat_turn")
 def answer_question(
     client: Any,
@@ -125,27 +168,17 @@ def answer_question(
     conversation.append({"role": "user", "content": question})
 
     for _ in range(5):
-        response = client.responses.create(
-            model=MODEL,
-            instructions=SYSTEM_PROMPT,
-            input=conversation,
-            tools=TOOLS,
-        )
-
-        for item in response.output:
-            print(item.type, getattr(item, "call_id", None), getattr(item, "name", None))
-
+        response = call_model(client, conversation)
         conversation.extend(
-            item.model_dump(exclude_none=True) for item in response.output
+            item.model_dump(exclude_none=True)
+            for item in response.output
         )
 
         tool_calls = [
             item for item in response.output if item.type == "function_call"
         ]
         if not tool_calls:
-            answer = response.output_text or "The model returned no answer."
-            conversation.append({"role": "assistant", "content": answer})
-            return answer
+            return response.output_text or "The model returned no answer."
 
         for call in tool_calls:
             try:
@@ -173,25 +206,26 @@ def chat() -> None:
     if not os.getenv("BRAINTRUST_API_KEY"):
         raise SystemExit("Set BRAINTRUST_API_KEY before running the demo.")
 
-    # Initialize Braintrust before constructing the provider client so that
-    # auto-instrumentation can capture OpenAI calls.
     logger = braintrust.init_logger(project=PROJECT)
-    braintrust.auto_instrument()
+
+    # OpenAI tracing is implemented by call_model(), so do not let automatic
+    # instrumentation create additional LLM or synthetic tool-call spans.
+    braintrust.auto_instrument(openai=False)
 
     from openai import OpenAI
 
     client = OpenAI()
     conversation: list[dict[str, Any]] = []
 
-    print(f"Demo agent using {MODEL}")
+    print(f"Manual tracing demo agent using {MODEL}")
     print("Try math, unit conversion, or a current-information question.")
     print("Type \\quit to exit.\n")
 
     session_id = str(uuid.uuid4())
     with logger.start_span(
         name="Chat Session",
-        metadata={"model": MODEL, "session_id": session_id}, 
-        tags=["multi-spam"]
+        metadata={"model": MODEL, "session_id": session_id},
+        tags=["manual-tracing"],
     ):
         while True:
             try:
