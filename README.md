@@ -79,3 +79,38 @@ traces using their shared `metadata.session_id`.
 Braintrust must initialize before the OpenAI client is created. Keeping the
 OpenAI import next to that startup sequence makes the ordering obvious in a
 teaching demo.
+
+## Remote eval
+
+`simple_agent_remote_eval.py` runs `simple_agent.py` against a Braintrust dataset
+and uses a separate LLM as a simulated user to continue each conversation.
+The remote eval exposes parameters for the agent model, simulated-user model,
+judge model, maximum turns, sampling temperature, agent system prompt, and the
+descriptions for the `calculate` and `web_search` tools.
+
+By default, it reads the `Simple Agent Conversations` dataset in the `Simple Agent`
+project. Override these values if your dataset has a different name:
+
+```bash
+export BRAINTRUST_PROJECT="Simple Agent"
+export BRAINTRUST_DATASET="Simple Agent Conversations"
+```
+
+Dataset rows can be plain strings or objects. For object rows, the eval looks for
+fields such as `goal`, `user_goal`, `scenario`, `initial_message`, `question`,
+`prompt`, `context`, and `success_criteria`. The row `expected` value is used as
+the judge criteria when present.
+
+Run once from the CLI:
+
+```bash
+bt eval simple_agent_remote_eval.py --language python
+```
+
+Expose it as a remote eval source for the Braintrust playground:
+
+```bash
+bt eval simple_agent_remote_eval.py --language python --dev
+```
+
+Then add `http://localhost:8300` in the project settings under Remote evals.

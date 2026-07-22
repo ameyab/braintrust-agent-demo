@@ -13,6 +13,7 @@ import requests
 from braintrust import traced
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
 GROUP_AS_CONVERSATION = True
 if GROUP_AS_CONVERSATION:
     PROJECT = os.getenv("BRAINTRUST_PROJECT", "Simple Agent")
@@ -124,13 +125,19 @@ TOOL_HANDLERS: dict[str, Callable[..., str]] = {
 
 
 @traced(name="openai.responses.create", type="llm", notrace_io=True)
-def call_model(client: Any, conversation: list[dict[str, Any]]) -> Any:
+def call_model(
+    client: Any,
+    conversation: list[dict[str, Any]],
+    model: str = MODEL,
+    system_prompt: str = SYSTEM_PROMPT,
+    tools: list[dict[str, Any]] = TOOLS,
+) -> Any:
     """Call OpenAI and log the LLM span in Braintrust's standard format."""
     response = client.responses.create(
-        model=MODEL,
-        instructions=SYSTEM_PROMPT,
+        model=model,
+        instructions=system_prompt,
         input=conversation,
-        tools=TOOLS,
+        tools=tools,
     )
 
     output = [
@@ -152,13 +159,13 @@ def call_model(client: Any, conversation: list[dict[str, Any]]) -> Any:
 
     braintrust.current_span().log(
         input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             *conversation,
         ],
         output=output,
         metadata={
-            "model": MODEL,
-            "tools": TOOLS,
+            "model": model,
+            "tools": tools,
         },
         metrics=metrics,
     )
@@ -171,12 +178,21 @@ def chat_turn(
     conversation: list[dict[str, Any]],
     user_input: str,
     session_id: str,
+    model: str = MODEL,
+    system_prompt: str = SYSTEM_PROMPT,
+    tools: list[dict[str, Any]] = TOOLS,
 ) -> str:
     """Run one agent turn, including any requested tools."""
     # braintrust.current_span().log(input=user_input, metadata={"session_id": session_id})
 
     for _ in range(5):
-        response = call_model(client, conversation)
+        response = call_model(
+            client,
+            conversation,
+            model=model,
+            system_prompt=system_prompt,
+            tools=tools,
+        )
         conversation.extend(
             item.model_dump(exclude_none=True)
             for item in response.output
