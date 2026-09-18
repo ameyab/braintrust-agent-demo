@@ -15,7 +15,10 @@ from braintrust.score import Score
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-import simple_agent
+try:
+    from simple_agent_examples import simple_agent
+except ModuleNotFoundError:
+    import simple_agent
 
 
 PROJECT = os.getenv("BRAINTRUST_PROJECT", simple_agent.PROJECT)
@@ -353,7 +356,7 @@ def _agent_tools(
     return tools
 
 
-@traced(name="simulated_user", type="llm")
+@traced(name="simulated_user")
 def simulated_user_turn(
     client: OpenAI,
     *,
@@ -383,10 +386,22 @@ def simulated_user_turn(
             "This should be a synthesis question, not a repeat of either earlier question."
         )
 
-    response = client.responses.create(
+    response = simple_agent.call_model(
+        client,
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "scenario": scenario,
+                        "transcript": transcript,
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ],
         model=model,
-        temperature=temperature,
-        instructions=(
+        system_prompt=(
             "You are simulating the USER in a terminal chat with an AI assistant. "
             "You are not the assistant and you must not tell the assistant what to provide. "
             "Your job is to pursue the scenario goal like a cooperative human user.\n\n"
@@ -401,18 +416,8 @@ def simulated_user_turn(
             "- When done=true, set message to an empty string unless a natural short acknowledgement is useful."
             f"{required_target_instruction}"
         ),
-        input=[
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "scenario": scenario,
-                        "transcript": transcript,
-                    },
-                    ensure_ascii=False,
-                ),
-            }
-        ],
+        tools=None,
+        temperature=temperature,
         text=_json_schema_format(SimulatedUserTurn, "simulated_user_turn"),
     )
     output = SimulatedUserTurn.model_validate(
@@ -554,7 +559,7 @@ def run_conversation(input: Any, hooks: Any) -> dict[str, Any]:
     }
 
 
-@traced(name="conversation_judge", type="llm")
+@traced(name="conversation_judge")
 def conversation_quality(input: Any, output: dict[str, Any], expected: Any) -> Score:
     if not os.getenv("OPENAI_API_KEY"):
         return Score(
@@ -565,15 +570,9 @@ def conversation_quality(input: Any, output: dict[str, Any], expected: Any) -> S
 
     client = OpenAI()
     criteria = _criteria(input, expected)
-    response = client.responses.create(
-        model=output.get("_judge_model", JUDGE_MODEL),
-        temperature=0,
-        instructions=(
-            "You are an evaluator for a tool-using terminal assistant. "
-            "Grade whether the transcript satisfies the criteria. "
-            "Score is 0 to 1."
-        ),
-        input=[
+    response = simple_agent.call_model(
+        client,
+        [
             {
                 "role": "user",
                 "content": json.dumps(
@@ -585,6 +584,14 @@ def conversation_quality(input: Any, output: dict[str, Any], expected: Any) -> S
                 ),
             }
         ],
+        model=output.get("_judge_model", JUDGE_MODEL),
+        system_prompt=(
+            "You are an evaluator for a tool-using terminal assistant. "
+            "Grade whether the transcript satisfies the criteria. "
+            "Score is 0 to 1."
+        ),
+        tools=None,
+        temperature=0,
         text=_json_schema_format(ConversationJudgment, "conversation_judgment"),
     )
     judged = ConversationJudgment.model_validate(

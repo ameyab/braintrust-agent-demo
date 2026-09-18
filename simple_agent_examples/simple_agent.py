@@ -130,15 +130,24 @@ def call_model(
     conversation: list[dict[str, Any]],
     model: str = MODEL,
     system_prompt: str = SYSTEM_PROMPT,
-    tools: list[dict[str, Any]] = TOOLS,
+    tools: list[dict[str, Any]] | None = TOOLS,
+    **request_kwargs: Any,
 ) -> Any:
-    """Call OpenAI and log the LLM span in Braintrust's standard format."""
-    response = client.responses.create(
-        model=model,
-        instructions=system_prompt,
-        input=conversation,
-        tools=tools,
-    )
+    """Call OpenAI and log the LLM span in Braintrust's standard format.
+
+    Extra keyword arguments (e.g. ``temperature`` or a structured-output
+    ``text`` format) are forwarded to ``client.responses.create`` and recorded
+    in the span metadata. Pass ``tools=None`` to call the model without tools.
+    """
+    request: dict[str, Any] = {
+        "model": model,
+        "instructions": system_prompt,
+        "input": conversation,
+        **request_kwargs,
+    }
+    if tools is not None:
+        request["tools"] = tools
+    response = client.responses.create(**request)
 
     output = [
         item.model_dump(exclude_none=True)
@@ -166,6 +175,7 @@ def call_model(
         metadata={
             "model": model,
             "tools": tools,
+            **request_kwargs,
         },
         metrics=metrics,
     )

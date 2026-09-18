@@ -2,7 +2,7 @@
 """Deployable Braintrust definitions for the demo agent's tools.
 
 Push with:
-    bt functions push deploy_tools.py --runner .venv/bin/python \
+    bt functions push simple_agent_examples/deploy_tools.py --runner .venv/bin/python \
         --requirements requirements.txt --if-exists replace --yes
 """
 
@@ -11,7 +11,10 @@ from __future__ import annotations
 import braintrust
 from pydantic import BaseModel, ConfigDict, Field
 
-from simple_agent import PROJECT, TOOLS, calculate, web_search
+try:
+    from simple_agent_examples.simple_agent import PROJECT, TOOLS, calculate, web_search
+except ModuleNotFoundError:
+    from simple_agent import PROJECT, TOOLS, calculate, web_search
 
 TOOL_DEFINITIONS = {tool["name"]: tool for tool in TOOLS}
 

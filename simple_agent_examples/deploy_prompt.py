@@ -2,7 +2,7 @@
 """Deploy the demo agent's system prompt to Braintrust.
 
 Push with:
-    bt functions push deploy_prompt.py --runner .venv/bin/python \
+    bt functions push simple_agent_examples/deploy_prompt.py --runner .venv/bin/python \
         --if-exists replace --yes --environment production
 """
 
@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import braintrust
 
-from simple_agent import MODEL, PROJECT, SYSTEM_PROMPT
+try:
+    from simple_agent_examples.simple_agent import MODEL, PROJECT, SYSTEM_PROMPT
+except ModuleNotFoundError:
+    from simple_agent import MODEL, PROJECT, SYSTEM_PROMPT
 
 project = braintrust.projects.create(PROJECT)
 project.prompts.create(
